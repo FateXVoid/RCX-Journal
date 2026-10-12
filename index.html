@@ -671,6 +671,14 @@ async function rcxMetaApiCall(action, fields={}){
   if(!response.ok||data.error)throw new Error(data.error||data.message||`MetaApi service error (${response.status})`);
   return data;
 }
+// Keep backend setup details out of the member UI; full diagnostics remain in the admin console/logs.
+function rcxMetaApiPublicMessage(message){
+  const value=String(message||'').trim();
+  if(/migration|MetaApi tables?|ตาราง MetaApi|ตรวจสอบ License ไม่สำเร็จ|บันทึกคำขอเชื่อมต่อใน RCX ไม่สำเร็จ/i.test(value)){
+    return 'ระบบ Sync ยังตั้งค่าไม่ครบ กรุณาลองใหม่ภายหลังหรือติดต่อผู้ดูแลระบบ';
+  }
+  return value||'เชื่อมต่อไม่สำเร็จ กรุณาลองอีกครั้ง';
+}
 async function rcxMetaApiLoadAllTrades(connectionId, maxRows=20000){
   const all=[];let offset=0;const pageSize=500;
   while(offset<maxRows){
@@ -738,8 +746,8 @@ function openMetaApiSync(platform='MT5'){
     try{
       const r=await rcxMetaApiCall('list');rcxMetaApiConnections=Array.isArray(r.connections)?r.connections:[];
       rcxMetaApiEnabled=rcxMetaApiConnections.length>0; if(rcxMetaApiEnabled)startRcxMetaApiAutoSync();
-      connBox.innerHTML=rcxMetaApiConnections.length?rcxMetaApiConnections.map(c=>`<div class="mt-existing-row" style="align-items:flex-start"><span style="flex:1;min-width:0"><b>${esc(c.label||c.platform+' account')} · ${esc(c.platform)}</b><small>${esc(c.server_name||'')} · ${c.last_account_login?'Account '+esc(c.last_account_login):'รอยืนยันบัญชี'}</small><small style="color:${rcxMetaStatusColor(c)}">● ${esc(rcxMetaStatusText(c))}${c.last_sync_at?' · Sync '+esc(new Date(c.last_sync_at).toLocaleString('th-TH')):''}</small>${c.last_error?`<small style="color:#e7a2a2">${esc(c.last_error)}</small>`:''}</span><div class="row" style="justify-content:flex-end;gap:5px">${c.metaapi_account_id?`<button class="small-b" data-ma-action="setup" data-ma-id="${esc(c.id)}">Setup link</button>`:''}<button class="small-b" data-ma-action="sync" data-ma-id="${esc(c.id)}">${c.metaapi_account_id?'Sync now':'Check setup'}</button><button class="small-b" data-ma-action="disconnect" data-ma-id="${esc(c.id)}" aria-label="Disconnect">×</button></div></div>`).join(''):'<div class="social-empty">ยังไม่มีบัญชีเชื่อมต่อ · เริ่มจากแบบฟอร์มด้านบน</div>';
-    }catch(err){connBox.innerHTML=`<div class="social-empty">${esc(err.message||'โหลดรายการไม่สำเร็จ')}</div>`;rcxMetaApiEnabled=false;}
+      connBox.innerHTML=rcxMetaApiConnections.length?rcxMetaApiConnections.map(c=>`<div class="mt-existing-row" style="align-items:flex-start"><span style="flex:1;min-width:0"><b>${esc(c.label||c.platform+' account')} · ${esc(c.platform)}</b><small>${esc(c.server_name||'')} · ${c.last_account_login?'Account '+esc(c.last_account_login):'รอยืนยันบัญชี'}</small><small style="color:${rcxMetaStatusColor(c)}">● ${esc(rcxMetaStatusText(c))}${c.last_sync_at?' · Sync '+esc(new Date(c.last_sync_at).toLocaleString('th-TH')):''}</small>${c.last_error?`<small style="color:#e7a2a2">${esc(rcxMetaApiPublicMessage(c.last_error))}</small>`:''}</span><div class="row" style="justify-content:flex-end;gap:5px">${c.metaapi_account_id?`<button class="small-b" data-ma-action="setup" data-ma-id="${esc(c.id)}">Setup link</button>`:''}<button class="small-b" data-ma-action="sync" data-ma-id="${esc(c.id)}">${c.metaapi_account_id?'Sync now':'Check setup'}</button><button class="small-b" data-ma-action="disconnect" data-ma-id="${esc(c.id)}" aria-label="Disconnect">×</button></div></div>`).join(''):'<div class="social-empty">ยังไม่มีบัญชีเชื่อมต่อ · เริ่มจากแบบฟอร์มด้านบน</div>';
+    }catch(err){console.warn('MetaApi list failed (admin diagnostics):',err?.message||err);connBox.innerHTML=`<div class="social-empty">${esc(rcxMetaApiPublicMessage(err.message||'โหลดรายการไม่สำเร็จ'))}</div>`;rcxMetaApiEnabled=false;}
   };
   const runSync=async(id,attempt=0,silent=false)=>{
     try{
@@ -752,7 +760,7 @@ function openMetaApiSync(platform='MT5'){
       status.textContent=`ซิงค์แล้ว · ${syncedRows.length} positions · เพิ่ม ${merged.added} · อัปเดต ${merged.updated}`;
       if(!silent)toast(`MetaTrader Sync สำเร็จ · เพิ่ม ${merged.added} รายการ · อัปเดต ${merged.updated} รายการ${merged.fxMissing?' · FX ใช้อัตรา 1:1 ชั่วคราว':''}`);
       await refreshList();return r;
-    }catch(err){status.textContent=err.message||'Sync failed';if(!silent)toast(err.message||'MetaTrader Sync ไม่สำเร็จ');return null;}
+    }catch(err){status.textContent=rcxMetaApiPublicMessage(err.message||'Sync failed');if(!silent)toast(rcxMetaApiPublicMessage(err.message||'MetaTrader Sync ไม่สำเร็จ'));return null;}
   };
   e.querySelector('[data-ma-close]')?.addEventListener('click',()=>e.remove());
   e.querySelector('#maRefresh')?.addEventListener('click',refreshList);
@@ -763,14 +771,14 @@ function openMetaApiSync(platform='MT5'){
     try{const r=await rcxMetaApiCall('connect',{platform,server,label});linkBox.dataset.connectionId=r.connection.id;rcxMetaApiEnabled=true;startRcxMetaApiAutoSync();
       if(r.pendingProvisioning){status.textContent=r.message||'MetaApi กำลังเตรียมบัญชี Cloud กรุณารอแล้วกด Verify & Sync';showLink('',r.message);await refreshList();setTimeout(()=>runSync(r.connection.id,0),15000);}
       else{showLink(r.configurationLink,r.message);status.textContent='สร้างลิงก์แล้ว · เปิดลิงก์ด้านล่าง แล้วกลับมากด Verify & Sync';await refreshList();}}
-    catch(err){status.textContent=err.message||'สร้างการเชื่อมต่อไม่สำเร็จ';toast(err.message||'สร้างการเชื่อมต่อไม่สำเร็จ');}
+    catch(err){status.textContent=rcxMetaApiPublicMessage(err.message||'สร้างการเชื่อมต่อไม่สำเร็จ');toast(rcxMetaApiPublicMessage(err.message||'สร้างการเชื่อมต่อไม่สำเร็จ'));}
     finally{btn.disabled=false;btn.textContent='Create secure connection link';}
   });
   connBox.addEventListener('click',async ev=>{
     const b=ev.target.closest('[data-ma-action]');if(!b)return;const action=b.dataset.maAction,id=b.dataset.maId;if(!id)return;
-    if(action==='setup'){b.disabled=true;try{const r=await rcxMetaApiCall('setup-link',{connectionId:id});linkBox.dataset.connectionId=id;showLink(r.configurationLink,'เปิดลิงก์เพื่อกำหนดหรือแก้ไขการเชื่อมต่อบน MetaApi');status.textContent='สร้าง Setup link แล้ว';}catch(err){status.textContent=err.message||'สร้าง Setup link ไม่สำเร็จ';}finally{b.disabled=false;}}
+    if(action==='setup'){b.disabled=true;try{const r=await rcxMetaApiCall('setup-link',{connectionId:id});linkBox.dataset.connectionId=id;showLink(r.configurationLink,'เปิดลิงก์เพื่อกำหนดหรือแก้ไขการเชื่อมต่อบน MetaApi');status.textContent='สร้าง Setup link แล้ว';}catch(err){status.textContent=rcxMetaApiPublicMessage(err.message||'สร้าง Setup link ไม่สำเร็จ');}finally{b.disabled=false;}}
     else if(action==='sync'){b.disabled=true;b.textContent='…';await runSync(id,0);b.disabled=false;b.textContent='Sync now';}
-    else if(action==='disconnect'){if(!confirm('ถอดบัญชีนี้จาก MetaApi Cloud หรือไม่? ประวัติที่ซิงค์เข้า Journal แล้วจะยังอยู่'))return;b.disabled=true;try{await rcxMetaApiCall('disconnect',{connectionId:id});toast('ถอดการเชื่อมต่อแล้ว');await refreshList();}catch(err){toast(err.message||'ถอดการเชื่อมต่อไม่สำเร็จ');}finally{b.disabled=false;}}
+    else if(action==='disconnect'){if(!confirm('ถอดบัญชีนี้จาก MetaApi Cloud หรือไม่? ประวัติที่ซิงค์เข้า Journal แล้วจะยังอยู่'))return;b.disabled=true;try{await rcxMetaApiCall('disconnect',{connectionId:id});toast('ถอดการเชื่อมต่อแล้ว');await refreshList();}catch(err){toast(rcxMetaApiPublicMessage(err.message||'ถอดการเชื่อมต่อไม่สำเร็จ'));}finally{b.disabled=false;}}
   });
   refreshList();
 }
